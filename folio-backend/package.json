@@ -1,7 +1,7 @@
 {
   "name": "folio-backend",
-  "version": "1.0.0",
-  "description": "Folio AI Chat Notes Backend",
+  "version": "2.0.0-local",
+  "description": "Folio AI Chat Notes Backend — local JSON storage",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -10,6 +10,7 @@
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^4.18.2",
+    "multer": "^1.4.5-lts.1",
     "uuid": "^9.0.0"
   }
 }
