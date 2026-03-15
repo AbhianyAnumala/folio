@@ -63,15 +63,72 @@ function TagPill({ tag, active, onClick, dark }) {
   );
 }
 
-// Import modal
+// ─── Import Modal ─────────────────────────────────────────────────────────────
 function ImportModal({ onClose, onSaved, apiBase, dark }) {
-  const [raw, setRaw] = useState("");
-  const [step, setStep] = useState("paste"); // paste → preview → saved
-  const [preview, setPreview] = useState(null);
-  const [title, setTitle] = useState("");
-  const [tags, setTags] = useState("");
+  const d = dark;
+  const [tab, setTab] = useState("manual");  // "manual" | "paste"
+  const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  // ── Shared meta ──
+  const [title, setTitle] = useState("");
+  const [tags, setTags] = useState("");
+  const [source, setSource] = useState("claude");
+
+  // ── Manual tab state ──
+  const [turns, setTurns] = useState([{ role:"user", content:"" }]);
+
+  function addTurn(role) {
+    setTurns(prev => [...prev, { role, content:"" }]);
+  }
+  function updateTurn(i, content) {
+    setTurns(prev => prev.map((t, idx) => idx === i ? { ...t, content } : t));
+  }
+  function removeTurn(i) {
+    setTurns(prev => prev.filter((_, idx) => idx !== i));
+  }
+  function moveTurn(i, dir) {
+    setTurns(prev => {
+      const arr = [...prev];
+      const swap = i + dir;
+      if (swap < 0 || swap >= arr.length) return arr;
+      [arr[i], arr[swap]] = [arr[swap], arr[i]];
+      return arr;
+    });
+  }
+
+  async function saveManual() {
+    const msgs = turns.filter(t => t.content.trim());
+    if (msgs.length === 0) { setError("Add at least one message."); return; }
+    if (!title.trim()) { setError("Please add a title."); return; }
+    setLoading(true); setError("");
+    try {
+      const payload = {
+        manual: true,
+        title: title.trim(),
+        source,
+        tags: tags.split(",").map(t => t.trim()).filter(Boolean),
+        messages: msgs.map((t, i) => ({ role: t.role, content: t.content.trim(), index: i })),
+      };
+      const res = await fetch(apiBase, {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Save failed");
+      onSaved(data.chat);
+      setSaved(true);
+    } catch(e) { setError(e.message); }
+    finally { setLoading(false); }
+  }
+
+  // ── Paste tab state ──
+  const [raw, setRaw] = useState("");
+  const [step, setStep] = useState("paste");
+  const [preview, setPreview] = useState(null);
+  const [previewTitle, setPreviewTitle] = useState("");
+  const [previewTags, setPreviewTags] = useState("");
 
   async function doParse() {
     if (!raw.trim()) { setError("Paste something first."); return; }
@@ -84,102 +141,228 @@ function ImportModal({ onClose, onSaved, apiBase, dark }) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Parse failed");
       setPreview(data);
-      setTitle(data.title || "");
+      setPreviewTitle(data.title || "");
       setStep("preview");
     } catch(e) { setError(e.message); }
     finally { setLoading(false); }
   }
 
-  async function doSave() {
+  async function doPasteSave() {
     setLoading(true); setError("");
     try {
       const res = await fetch(apiBase, {
         method:"POST", headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({ raw, title: title || undefined, tags: tags.split(",").map(t=>t.trim()).filter(Boolean) }),
+        body: JSON.stringify({ raw, title: previewTitle || undefined, tags: previewTags.split(",").map(t=>t.trim()).filter(Boolean) }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Save failed");
       onSaved(data.chat);
-      setStep("saved");
+      setSaved(true);
     } catch(e) { setError(e.message); }
     finally { setLoading(false); }
   }
 
-  const d = dark;
-  const overlay = { position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:24 };
-  const modal = { background:d?"#1e1812":"#faf6f0", borderRadius:16, width:"100%", maxWidth:620, padding:32, boxShadow:"0 24px 80px rgba(0,0,0,0.3)", fontFamily:"Lora,serif", color:d?"#e8ddd0":"#2c1f0e", position:"relative", maxHeight:"85vh", overflowY:"auto" };
-  const inp = { width:"100%", padding:"9px 12px", borderRadius:8, border:`1px solid ${d?"#3a2e20":"#d0b898"}`, background:d?"#2a2018":"#fff", color:d?"#e8ddd0":"#2c1f0e", fontSize:13, fontFamily:"Lora,serif", outline:"none" };
+  // ── Styles ──
+  const overlay = { position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:20 };
+  const modal = { background:d?"#1a1610":"#faf6f0",borderRadius:16,width:"100%",maxWidth:680,boxShadow:"0 24px 80px rgba(0,0,0,0.35)",fontFamily:"Lora,serif",color:d?"#e8ddd0":"#2c1f0e",position:"relative",maxHeight:"92vh",display:"flex",flexDirection:"column" };
+  const inp = { width:"100%",padding:"9px 12px",borderRadius:8,border:`1px solid ${d?"#3a2e20":"#d0b898"}`,background:d?"#2a2018":"#fff",color:d?"#e8ddd0":"#2c1f0e",fontSize:13,fontFamily:"Lora,serif",outline:"none" };
+  const label = { fontSize:11,letterSpacing:"0.09em",textTransform:"uppercase",color:d?"#7a6a58":"#a08060",display:"block",marginBottom:5 };
+  const btnPrimary = { padding:"10px 20px",borderRadius:8,border:"none",background:d?"#e8c88a":"#7a4a1a",color:d?"#1a1510":"#fff",fontSize:13,fontFamily:"Lora,serif",fontWeight:500,cursor:"pointer" };
+  const btnSecondary = { padding:"10px 20px",borderRadius:8,border:`1px solid ${d?"#3a2e20":"#d0b898"}`,background:"transparent",color:d?"#9a8a78":"#8a6a4a",fontSize:13,fontFamily:"Lora,serif",cursor:"pointer" };
+
+  if (saved) return (
+    <div style={overlay}>
+      <div style={{ ...modal, alignItems:"center", justifyContent:"center", padding:"48px 32px", textAlign:"center" }}>
+        <div style={{ fontSize:52, marginBottom:16 }}>✓</div>
+        <div style={{ fontFamily:"Playfair Display,serif",fontSize:24,fontWeight:700,color:d?"#e8c88a":"#7a4a1a" }}>Saved!</div>
+        <p style={{ fontSize:13,color:d?"#9a8a78":"#9a7a5a",marginTop:8 }}>Your chat is now in Folio.</p>
+        <button onClick={onClose} style={{ ...btnPrimary, marginTop:24, padding:"10px 36px" }}>Done</button>
+      </div>
+    </div>
+  );
 
   return (
     <div style={overlay} onClick={e => e.target===e.currentTarget && onClose()}>
       <div style={modal}>
-        <button onClick={onClose} style={{ position:"absolute",top:20,right:20,background:"none",border:"none",fontSize:20,cursor:"pointer",color:d?"#7a6a58":"#a08060" }}>✕</button>
 
-        {step === "paste" && <>
-          <div style={{ fontFamily:"Playfair Display,serif",fontSize:22,fontWeight:700,marginBottom:6,color:d?"#e8c88a":"#7a4a1a" }}>Import a Chat</div>
-          <p style={{ fontSize:13,color:d?"#9a8a78":"#9a7a5a",marginBottom:20,lineHeight:1.6 }}>
-            Paste anything — Claude, ChatGPT, Gemini copy-paste or JSON export. Auto-detected.
-          </p>
-          <textarea
-            value={raw} onChange={e=>setRaw(e.target.value)}
-            placeholder={"Paste your chat here...\n\nHuman: What is...\nAssistant: Great question...\n\nor JSON export, or Markdown — any format works."}
-            style={{ ...inp, height:220, resize:"vertical", lineHeight:1.6 }}
-          />
-          {error && <div style={{ color:"#c0604a",fontSize:12.5,marginTop:8 }}>{error}</div>}
-          <button onClick={doParse} disabled={loading} style={{
-            marginTop:16,width:"100%",padding:"12px",borderRadius:8,border:"none",
-            background:d?"#e8c88a":"#7a4a1a",color:d?"#1a1510":"#fff",
-            fontSize:14,fontFamily:"Lora,serif",fontWeight:500,cursor:"pointer",opacity:loading?0.6:1,
-          }}>{loading?"Parsing…":"Parse & Preview →"}</button>
-        </>}
-
-        {step === "preview" && preview && <>
-          <div style={{ fontFamily:"Playfair Display,serif",fontSize:22,fontWeight:700,marginBottom:16,color:d?"#e8c88a":"#7a4a1a" }}>Preview</div>
-          <div style={{ display:"flex",gap:10,marginBottom:20,flexWrap:"wrap" }}>
-            <span style={{ padding:"4px 12px",borderRadius:20,fontSize:12,background:sourceMeta(preview.source,d).bg,color:sourceMeta(preview.source,d).color,fontWeight:500 }}>
-              {sourceMeta(preview.source,d).label}
-            </span>
-            <span style={{ padding:"4px 12px",borderRadius:20,fontSize:12,background:d?"#2a2018":"#f0e4d4",color:d?"#c0a878":"#8a6040" }}>
-              {preview.messageCount} messages
-            </span>
+        {/* ── Header ── */}
+        <div style={{ padding:"24px 28px 0", flexShrink:0 }}>
+          <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:18 }}>
+            <div style={{ fontFamily:"Playfair Display,serif",fontSize:21,fontWeight:700,color:d?"#e8c88a":"#7a4a1a" }}>
+              Add Chat
+            </div>
+            <button onClick={onClose} style={{ background:"none",border:"none",fontSize:20,cursor:"pointer",color:d?"#7a6a58":"#a08060",lineHeight:1 }}>✕</button>
           </div>
 
-          <div style={{ marginBottom:14 }}>
-            <label style={{ fontSize:11.5,letterSpacing:"0.08em",textTransform:"uppercase",color:d?"#7a6a58":"#a08060",display:"block",marginBottom:6 }}>Title</label>
-            <input value={title} onChange={e=>setTitle(e.target.value)} style={inp} />
-          </div>
-          <div style={{ marginBottom:20 }}>
-            <label style={{ fontSize:11.5,letterSpacing:"0.08em",textTransform:"uppercase",color:d?"#7a6a58":"#a08060",display:"block",marginBottom:6 }}>Tags (comma separated)</label>
-            <input value={tags} onChange={e=>setTags(e.target.value)} placeholder="work, ideas, research" style={inp} />
-          </div>
-
-          <div style={{ background:d?"#2a2018":"#f5ede2",borderRadius:10,padding:16,marginBottom:20 }}>
-            <div style={{ fontSize:11.5,color:d?"#7a6a58":"#a08060",marginBottom:10,letterSpacing:"0.07em",textTransform:"uppercase" }}>First messages</div>
-            {preview.messages.map((m,i) => (
-              <div key={i} style={{ marginBottom:8,display:"flex",gap:10,alignItems:"flex-start" }}>
-                <span style={{ fontSize:11,padding:"2px 8px",borderRadius:10,background:m.role==="user"?(d?"#3a2e20":"#e8d8c0"):(d?"#1a3020":"#d8f0e0"),color:m.role==="user"?(d?"#c0a878":"#7a5030"):(d?"#78b890":"#2a7a50"),flexShrink:0,marginTop:2 }}>{m.role}</span>
-                <span style={{ fontSize:13,lineHeight:1.6,color:d?"#c0b0a0":"#5a4030" }}>{m.content.slice(0,160)}{m.content.length>160?"…":""}</span>
-              </div>
+          {/* Tabs */}
+          <div style={{ display:"flex",gap:4,background:d?"#2a2018":"#e8d8c0",borderRadius:10,padding:4 }}>
+            {[["manual","✏️  Manual Entry"],["paste","📋  Paste Import"]].map(([id,label]) => (
+              <button key={id} onClick={()=>{ setTab(id); setError(""); }} style={{
+                flex:1,padding:"8px 12px",borderRadius:7,border:"none",cursor:"pointer",
+                fontFamily:"Lora,serif",fontSize:13,
+                background:tab===id?(d?"#e8c88a":"#7a4a1a"):"transparent",
+                color:tab===id?(d?"#1a1510":"#fff"):(d?"#9a8a78":"#8a6a4a"),
+                fontWeight:tab===id?500:400,transition:"all 0.15s",
+              }}>{label}</button>
             ))}
           </div>
+        </div>
 
+        {/* ── Scrollable body ── */}
+        <div style={{ flex:1,overflowY:"auto",padding:"20px 28px 0" }}>
+
+          {/* ════ MANUAL TAB ════ */}
+          {tab === "manual" && <>
+
+            {/* Meta row */}
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16 }}>
+              <div>
+                <span style={label}>Chat Title *</span>
+                <input value={title} onChange={e=>setTitle(e.target.value)} placeholder="e.g. React hooks question" style={inp} />
+              </div>
+              <div>
+                <span style={label}>AI Source</span>
+                <select value={source} onChange={e=>setSource(e.target.value)} style={{ ...inp, appearance:"none" }}>
+                  <option value="claude">Claude</option>
+                  <option value="chatgpt">ChatGPT</option>
+                  <option value="gemini">Gemini</option>
+                  <option value="generic">Other</option>
+                </select>
+              </div>
+            </div>
+            <div style={{ marginBottom:20 }}>
+              <span style={label}>Tags (comma separated)</span>
+              <input value={tags} onChange={e=>setTags(e.target.value)} placeholder="work, ideas, research" style={inp} />
+            </div>
+
+            {/* Turns builder */}
+            <div style={{ marginBottom:12 }}>
+              <span style={label}>Conversation ({turns.length} message{turns.length!==1?"s":""})</span>
+            </div>
+
+            <div style={{ display:"flex",flexDirection:"column",gap:10,marginBottom:16 }}>
+              {turns.map((turn, i) => (
+                <div key={i} style={{
+                  borderRadius:10,
+                  border:`1px solid ${turn.role==="user"?(d?"#4a3825":"#d4b896"):(d?"#1e3028":"#b8dcc8")}`,
+                  background:turn.role==="user"?(d?"#221c12":"#fffaf4"):(d?"#121e18":"#f4fcf6"),
+                  overflow:"hidden",
+                }}>
+                  {/* Turn header */}
+                  <div style={{ display:"flex",alignItems:"center",gap:8,padding:"8px 12px",borderBottom:`1px solid ${turn.role==="user"?(d?"#3a2e1a":"#e8d4b8"):(d?"#1a2e22":"#c8e8d4")}`,background:turn.role==="user"?(d?"#2a2014":"#fff8ee"):(d?"#141e18":"#eef8f2") }}>
+                    <span style={{ fontSize:11,fontWeight:600,letterSpacing:"0.08em",textTransform:"uppercase",color:turn.role==="user"?(d?"#c0a060":"#8a5820"):(d?"#60a878":"#2a7a50") }}>
+                      {turn.role === "user" ? "👤 User Query" : "🤖 AI Response"}
+                    </span>
+                    <div style={{ marginLeft:"auto",display:"flex",gap:4 }}>
+                      {/* Swap role button */}
+                      <button onClick={()=>setTurns(prev=>prev.map((t,idx)=>idx===i?{...t,role:t.role==="user"?"assistant":"user"}:t))}
+                        title="Swap role"
+                        style={{ background:"none",border:"none",cursor:"pointer",fontSize:13,color:d?"#7a6a58":"#a08060",padding:"2px 5px",borderRadius:4 }}>⇄</button>
+                      {/* Move up */}
+                      {i > 0 && <button onClick={()=>moveTurn(i,-1)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:12,color:d?"#7a6a58":"#a08060",padding:"2px 5px",borderRadius:4 }}>↑</button>}
+                      {/* Move down */}
+                      {i < turns.length-1 && <button onClick={()=>moveTurn(i,1)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:12,color:d?"#7a6a58":"#a08060",padding:"2px 5px",borderRadius:4 }}>↓</button>}
+                      {/* Remove */}
+                      {turns.length > 1 && <button onClick={()=>removeTurn(i)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:14,color:"#c06050",padding:"2px 5px",borderRadius:4 }}>✕</button>}
+                    </div>
+                  </div>
+                  {/* Textarea */}
+                  <textarea
+                    value={turn.content}
+                    onChange={e=>updateTurn(i,e.target.value)}
+                    placeholder={turn.role==="user" ? "Type the user's question or message…" : "Type the AI's response…"}
+                    style={{ width:"100%",padding:"12px",border:"none",background:"transparent",color:d?"#e8ddd0":"#2c1f0e",fontSize:13.5,fontFamily:"Lora,serif",lineHeight:1.7,resize:"vertical",minHeight:80,outline:"none",boxSizing:"border-box" }}
+                  />
+                </div>
+              ))}
+            </div>
+
+            {/* Add turn buttons */}
+            <div style={{ display:"flex",gap:8,marginBottom:20 }}>
+              <button onClick={()=>addTurn("user")} style={{
+                flex:1,padding:"9px",borderRadius:8,cursor:"pointer",fontFamily:"Lora,serif",fontSize:13,
+                border:`1px dashed ${d?"#4a3825":"#c8a870"}`,background:"transparent",
+                color:d?"#c0a060":"#8a5820",
+              }}>+ User Query</button>
+              <button onClick={()=>addTurn("assistant")} style={{
+                flex:1,padding:"9px",borderRadius:8,cursor:"pointer",fontFamily:"Lora,serif",fontSize:13,
+                border:`1px dashed ${d?"#1e3828":"#98c8a8"}`,background:"transparent",
+                color:d?"#60a878":"#2a7a50",
+              }}>+ AI Response</button>
+            </div>
+          </>}
+
+          {/* ════ PASTE TAB ════ */}
+          {tab === "paste" && <>
+            {step === "paste" && <>
+              <p style={{ fontSize:13,color:d?"#9a8a78":"#9a7a5a",marginBottom:16,lineHeight:1.65 }}>
+                Paste anything — Claude, ChatGPT, Gemini copy-paste or JSON export. Format is auto-detected.
+              </p>
+              <textarea
+                value={raw} onChange={e=>setRaw(e.target.value)}
+                placeholder={"Paste your chat here… Works with: • Claude.ai copy-paste /n• ChatGPT copy-paste /n• Gemini copy-paste /n• Any JSON export"}
+                style={{ ...inp,height:240,resize:"vertical",lineHeight:1.65,marginBottom:4 }}
+              />
+            </>}
+
+            {step === "preview" && preview && <>
+              <div style={{ display:"flex",gap:8,marginBottom:16,flexWrap:"wrap" }}>
+                <span style={{ padding:"3px 12px",borderRadius:20,fontSize:12,background:sourceMeta(preview.source,d).bg,color:sourceMeta(preview.source,d).color,fontWeight:500 }}>{sourceMeta(preview.source,d).label}</span>
+                <span style={{ padding:"3px 12px",borderRadius:20,fontSize:12,background:d?"#2a2018":"#f0e4d4",color:d?"#c0a878":"#8a6040" }}>{preview.messageCount} messages detected</span>
+              </div>
+              <div style={{ marginBottom:12 }}>
+                <span style={label}>Title</span>
+                <input value={previewTitle} onChange={e=>setPreviewTitle(e.target.value)} style={inp} />
+              </div>
+              <div style={{ marginBottom:16 }}>
+                <span style={label}>Tags</span>
+                <input value={previewTags} onChange={e=>setPreviewTags(e.target.value)} placeholder="work, ideas, research" style={inp} />
+              </div>
+              <div style={{ background:d?"#2a2018":"#f5ede2",borderRadius:10,padding:14,marginBottom:4 }}>
+                <div style={{ fontSize:11,color:d?"#7a6a58":"#a08060",marginBottom:10,letterSpacing:"0.07em",textTransform:"uppercase" }}>Preview (first 4 messages)</div>
+                {preview.messages.map((m,i) => (
+                  <div key={i} style={{ marginBottom:8,display:"flex",gap:10,alignItems:"flex-start" }}>
+                    <span style={{ fontSize:11,padding:"2px 8px",borderRadius:10,flexShrink:0,marginTop:2,background:m.role==="user"?(d?"#3a2e20":"#e8d8c0"):(d?"#1a3020":"#d8f0e0"),color:m.role==="user"?(d?"#c0a878":"#7a5030"):(d?"#78b890":"#2a7a50") }}>{m.role==="user"?"user":"ai"}</span>
+                    <span style={{ fontSize:12.5,lineHeight:1.6,color:d?"#c0b0a0":"#5a4030" }}>{m.content.slice(0,180)}{m.content.length>180?"…":""}</span>
+                  </div>
+                ))}
+              </div>
+            </>}
+          </>}
+        </div>
+
+        {/* ── Footer ── */}
+        <div style={{ padding:"16px 28px 24px",flexShrink:0,borderTop:`1px solid ${d?"#2e2218":"#e8ddd0"}`,marginTop:12 }}>
           {error && <div style={{ color:"#c0604a",fontSize:12.5,marginBottom:10 }}>{error}</div>}
-          <div style={{ display:"flex",gap:10 }}>
-            <button onClick={()=>setStep("paste")} style={{ flex:1,padding:"11px",borderRadius:8,border:`1px solid ${d?"#3a2e20":"#d0b898"}`,background:"transparent",color:d?"#9a8a78":"#8a6a4a",fontSize:13,fontFamily:"Lora,serif",cursor:"pointer" }}>← Back</button>
-            <button onClick={doSave} disabled={loading} style={{ flex:2,padding:"11px",borderRadius:8,border:"none",background:d?"#e8c88a":"#7a4a1a",color:d?"#1a1510":"#fff",fontSize:14,fontFamily:"Lora,serif",fontWeight:500,cursor:"pointer",opacity:loading?0.6:1 }}>
-              {loading?"Saving…":"Save to Folio ✓"}
-            </button>
-          </div>
-        </>}
 
-        {step === "saved" && <>
-          <div style={{ textAlign:"center",padding:"40px 0" }}>
-            <div style={{ fontSize:48,marginBottom:16 }}>✓</div>
-            <div style={{ fontFamily:"Playfair Display,serif",fontSize:24,fontWeight:700,color:d?"#e8c88a":"#7a4a1a" }}>Saved!</div>
-            <p style={{ fontSize:14,color:d?"#9a8a78":"#9a7a5a",marginTop:10 }}>Your chat is now in Folio.</p>
-            <button onClick={onClose} style={{ marginTop:24,padding:"10px 32px",borderRadius:8,border:"none",background:d?"#e8c88a":"#7a4a1a",color:d?"#1a1510":"#fff",fontSize:13,fontFamily:"Lora,serif",cursor:"pointer" }}>Done</button>
-          </div>
-        </>}
+          {tab === "manual" && (
+            <div style={{ display:"flex",gap:10 }}>
+              <button onClick={onClose} style={{ ...btnSecondary,flex:1 }}>Cancel</button>
+              <button onClick={saveManual} disabled={loading} style={{ ...btnPrimary,flex:3,opacity:loading?0.6:1 }}>
+                {loading ? "Saving…" : `Save Chat (${turns.filter(t=>t.content.trim()).length} messages) ✓`}
+              </button>
+            </div>
+          )}
+
+          {tab === "paste" && step === "paste" && (
+            <div style={{ display:"flex",gap:10 }}>
+              <button onClick={onClose} style={{ ...btnSecondary,flex:1 }}>Cancel</button>
+              <button onClick={doParse} disabled={loading} style={{ ...btnPrimary,flex:3,opacity:loading?0.6:1 }}>
+                {loading ? "Parsing…" : "Parse & Preview →"}
+              </button>
+            </div>
+          )}
+
+          {tab === "paste" && step === "preview" && (
+            <div style={{ display:"flex",gap:10 }}>
+              <button onClick={()=>setStep("paste")} style={{ ...btnSecondary,flex:1 }}>← Back</button>
+              <button onClick={doPasteSave} disabled={loading} style={{ ...btnPrimary,flex:3,opacity:loading?0.6:1 }}>
+                {loading ? "Saving…" : "Save to Folio ✓"}
+              </button>
+            </div>
+          )}
+        </div>
+
       </div>
     </div>
   );

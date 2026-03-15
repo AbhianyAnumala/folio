@@ -61,23 +61,47 @@ app.post("/api/chats/parse", (req, res) => {
 
 app.post("/api/chats", (req, res) => {
   try {
-    const raw = typeof req.body === "string" ? req.body : req.body?.raw || req.body?.content || "";
-    const customTitle = req.body?.title;
-    const tags = req.body?.tags || [];
+    const body = req.body || {};
 
-    if (!raw.trim()) return res.status(400).json({ error: "No content provided." });
+    let title, source, tags, messages;
 
-    const parsed = parseChat(raw);
+    if (body.manual === true) {
+      // ── Manual entry: messages already structured, no parsing needed ──
+      if (!body.messages || body.messages.length === 0)
+        return res.status(400).json({ error: "No messages provided." });
+      if (!body.title || !body.title.trim())
+        return res.status(400).json({ error: "Title is required for manual chats." });
+
+      title    = body.title.trim();
+      source   = body.source || "generic";
+      tags     = body.tags || [];
+      messages = body.messages.map((m, i) => ({
+        role:    m.role === "user" ? "user" : "assistant",
+        content: (m.content || "").trim(),
+        index:   i,
+      })).filter(m => m.content);
+
+    } else {
+      // ── Paste / import: parse raw text ──
+      const raw = typeof body === "string" ? body : body.raw || body.content || "";
+      if (!raw.trim()) return res.status(400).json({ error: "No content provided." });
+
+      const parsed = parseChat(raw);
+      title    = body.title || parsed.title;
+      source   = parsed.source;
+      tags     = body.tags || [];
+      messages = parsed.messages;
+    }
 
     const chat = {
-      id: uuidv4(),
-      title: customTitle || parsed.title,
-      source: parsed.source,
+      id:           uuidv4(),
+      title,
+      source,
       tags,
-      messageCount: parsed.messages.length,
-      messages: parsed.messages,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      messageCount: messages.length,
+      messages,
+      createdAt:    new Date().toISOString(),
+      updatedAt:    new Date().toISOString(),
     };
 
     storage.create(chat);
